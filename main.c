@@ -1,59 +1,74 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
+#include <net/if.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/sctp.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
 
-// Функция для приема данных от клиента и отправки RRC Connection Setup Complete
-void handle_client(int client_socket) {
-    char buffer[1024] = {0};
+#include "RRCConnectionRequestCoder.h"
+#include "RRCConnectionSetupCompleteCoder.h"
+#include <unistd.h>
+#include <time.h>
 
-    // Прием данных от клиента (RRC Connection Setup Request)
-    recv(client_socket, buffer, 1024, 0);
-    printf("Получено от клиента: %s\n", buffer);
+#define BUFFER_SIZE 1024
 
-    // Отправка RRC Connection Setup Complete клиенту
-    char response[] = "RRC Connection Setup Complete";
-    send(client_socket, response, strlen(response), 0);
 
-    printf("RRC Connection Setup Complete отправлен клиенту.\n");
+void tx_send(uint8_t **buffer, ssize_t *len) {
+    struct sockaddr_in servaddr = {
+        servaddr.sin_family = AF_INET,
+        servaddr.sin_port = htons(2500),
+        servaddr.sin_addr.s_addr = inet_addr("127.0.0.1"),
+    };
+
+    int sockfd;
+
+    sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP);
+    if (sockfd < 0) {
+        printf("Error when opening socket\n");
+        exit(1);
+    }
+
+    int ret = connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
+    if (ret < 0) {
+        printf("Error when connecting socket\n");
+        exit(1);
+    }
+
+    ret = sctp_sendmsg(sockfd, *buffer, *len, NULL, 0, 0, 0, 0, 0, 0);
+    if (ret < 0) {
+        printf("Error when sending msg\n");
+        exit(1);
+    }
+
+    char resp[BUFFER_SIZE];
+    ssize_t valread = read(sockfd, buffer, BUFFER_SIZE);
+    if (valread > 0) {
+        printf("Response from server: %s\n", *buffer);
+    } else {
+        printf("No response received from server.\n");
+    }
+
+    printf("Sent packet\n");
+
+    close(sockfd);
 }
 
+
 int main() {
-    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket == -1) {
-        perror("error socket");
-        return 1;
-    }
+    srand(time(NULL));
 
-    struct sockaddr_in server_addr, client_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(8888);
-    server_addr.sin_addr.s_addr = INADDR_ANY;
+    uint8_t *buffer;
+    ssize_t len;
+    RRCConnectionRequestCoder(&buffer, &len);
+    //tx_send(&buffer, &len);
+    free(buffer);
 
-    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
-        perror("error sockets to addres");
-        return 1;
-    }
+    RRCConnectionSetupCompleteCoder(&buffer, &len);
+    //tx_send(&buffer, &len);
 
-    if (listen(server_socket, 5) == -1) {
-        perror("error listen");
-        return 1;
-    }
-
-    printf("Server awaits...\n");
-
-    int client_socket = accept(server_socket, NULL, NULL);
-    if (client_socket == -1) {
-        perror("error connect");
-        return 1;
-    }
-
-    handle_client(client_socket);
-
-    close(client_socket);
-    close(server_socket);
 
     return 0;
 }
